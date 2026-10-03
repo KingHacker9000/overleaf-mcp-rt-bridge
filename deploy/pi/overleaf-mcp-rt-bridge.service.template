@@ -1,0 +1,36 @@
+[Unit]
+Description=Overleaf RT MCP HTTP Bridge
+Wants=network-online.target
+After=network-online.target
+RequiresMountsFor=@@APP_ROOT@@
+
+[Service]
+Type=simple
+User=@@RUN_USER@@
+Group=@@RUN_USER@@
+WorkingDirectory=@@REPO_DIR@@
+Environment=NODE_ENV=production
+EnvironmentFile=@@APP_ROOT@@/secrets/bridge.env
+ExecStartPre=/usr/bin/test -r @@APP_ROOT@@/secrets/credentials.json
+ExecStartPre=/usr/bin/test -x @@REPO_DIR@@/node_modules/.bin/overleaf-mcp-rt
+ExecStart=/usr/bin/node @@REPO_DIR@@/src/index.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+UMask=0077
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target
