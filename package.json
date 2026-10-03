@@ -1,0 +1,21 @@
+{
+  "name": "overleaf-mcp-rt-bridge",
+  "version": "0.1.0",
+  "description": "Authenticated Streamable HTTP bridge for overleaf-mcp-rt",
+  "type": "module",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "check": "node --check src/*.js && node --test",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "express": "5.1.0",
+    "overleaf-mcp-rt": "2.2.0"
+  }
+}
