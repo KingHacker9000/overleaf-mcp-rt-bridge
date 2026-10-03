@@ -114,10 +114,28 @@ chmod 644 "$UNIT_TARGET"
 systemctl daemon-reload
 systemctl enable --now "$SERVICE_NAME.service"
 
+echo "== wait for readiness =="
+ready=0
+for _ in {1..20}; do
+  if curl -fsS "http://$BIND_ADDRESS:$PORT/health" >/tmp/overleaf-mcp-rt-bridge-health.json 2>/dev/null; then
+    ready=1
+    break
+  fi
+  sleep 0.5
+done
+
+if [[ "$ready" -ne 1 ]]; then
+  echo "error: bridge did not become healthy in time" >&2
+  systemctl status "$SERVICE_NAME.service" --no-pager >&2 || true
+  journalctl -u "$SERVICE_NAME.service" -n 50 --no-pager >&2 || true
+  exit 1
+fi
+
 echo "== service =="
 systemctl status "$SERVICE_NAME.service" --no-pager
 echo
-curl -fsS "http://$BIND_ADDRESS:$PORT/health"
+cat /tmp/overleaf-mcp-rt-bridge-health.json
+rm -f /tmp/overleaf-mcp-rt-bridge-health.json
 echo
 echo
 echo "Installed MCP endpoint:"
