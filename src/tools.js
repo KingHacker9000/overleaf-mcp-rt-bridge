@@ -13,6 +13,11 @@ const DESTRUCTIVE = new Set([
   'overleaf_delete_entity',
 ]);
 
+const OAUTH_SCOPES = (process.env.MCP_OAUTH_SCOPES || 'overleaf:owner')
+  .split(',')
+  .map((scope) => scope.trim())
+  .filter(Boolean);
+
 export function toolAllowed(name, allowedTools, deniedTools) {
   if (deniedTools.has(name)) return false;
   if (allowedTools.size > 0 && !allowedTools.has(name)) return false;
@@ -39,9 +44,15 @@ export function normalizeJsonSchema(value) {
 
 export function annotateTool(tool) {
   const readOnly = READ_ONLY.has(tool.name);
+  const securitySchemes = [{ type: 'oauth2', scopes: OAUTH_SCOPES }];
   return {
     ...tool,
     inputSchema: normalizeJsonSchema(tool.inputSchema),
+    securitySchemes,
+    _meta: {
+      ...(tool._meta ?? {}),
+      securitySchemes,
+    },
     annotations: {
       ...(tool.annotations ?? {}),
       readOnlyHint: readOnly,
