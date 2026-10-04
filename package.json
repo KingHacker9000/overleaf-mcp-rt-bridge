@@ -10,7 +10,7 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "check": "node --check src/*.js && node --test",
+    "check": "node --check src/*.js && node --check deploy/oauth/oauth-proxy.mjs && node --test",
     "test": "node --test"
   },
   "dependencies": {
