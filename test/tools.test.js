@@ -46,6 +46,10 @@ test('tool annotations distinguish reads and destructive writes', () => {
   assert.equal(read.annotations.readOnlyHint, true);
   assert.equal(read.annotations.destructiveHint, false);
   assert.equal('required' in read.inputSchema, false);
+  assert.deepEqual(read.securitySchemes, [
+    { type: 'oauth2', scopes: ['overleaf:owner'] },
+  ]);
+  assert.deepEqual(read._meta.securitySchemes, read.securitySchemes);
 
   const del = annotateTool({ name: 'overleaf_delete_entity', inputSchema: {} });
   assert.equal(del.annotations.readOnlyHint, false);
