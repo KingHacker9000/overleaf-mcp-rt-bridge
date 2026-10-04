@@ -152,7 +152,7 @@ function renderLogin(requestId, error = '') {
 <body style="font-family:system-ui,sans-serif;max-width:520px;margin:10vh auto;padding:24px">
   <h1>Overleaf MCP</h1>
   ${message}
-  <form method="post" action="/oauth/authorize">
+  <form method="post" action="${escapeHtml(issuer)}/oauth/authorize">
     <input type="hidden" name="request_id" value="${escapeHtml(requestId)}">
     <label for="password">Owner password</label><br>
     <input id="password" name="password" type="password" autocomplete="current-password" required
