@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 
 function required(name) {
   const value = process.env[name];
@@ -241,43 +242,69 @@ async function proxyMcp(req, res) {
   }
 
   const controller = new AbortController();
-  req.on('aborted', () => controller.abort());
+  const abortUpstream = () => {
+    if (!controller.signal.aborted) controller.abort();
+  };
+  const abortOnEarlyResponseClose = () => {
+    if (!res.writableFinished) abortUpstream();
+  };
 
-  let body;
-  if (!['GET', 'HEAD'].includes(req.method || 'GET')) {
-    body = await readBody(req, 40 * 1024 * 1024);
+  req.once('aborted', abortUpstream);
+  res.once('close', abortOnEarlyResponseClose);
+
+  try {
+    let body;
+    if (!['GET', 'HEAD'].includes(req.method || 'GET')) {
+      body = await readBody(req, 40 * 1024 * 1024);
+    }
+
+    const upstream = await fetch(upstreamUrl, {
+      method: req.method,
+      headers,
+      body,
+      redirect: 'manual',
+      signal: controller.signal,
+    });
+
+    const blockedHeaders = new Set([
+      'connection',
+      'content-length',
+      'keep-alive',
+      'proxy-authenticate',
+      'proxy-authorization',
+      'te',
+      'trailer',
+      'transfer-encoding',
+      'upgrade',
+    ]);
+    for (const [name, value] of upstream.headers) {
+      if (!blockedHeaders.has(name.toLowerCase())) res.setHeader(name, value);
+    }
+    res.statusCode = upstream.status;
+
+    if (!upstream.body) {
+      res.end();
+      return;
+    }
+
+    await pipeline(Readable.fromWeb(upstream.body), res);
+  } catch (error) {
+    const expectedDisconnect =
+      controller.signal.aborted &&
+      (error?.name === 'AbortError' ||
+        error?.code === 'ABORT_ERR' ||
+        req.aborted ||
+        res.destroyed);
+
+    if (expectedDisconnect) {
+      console.log('[oauth-proxy] MCP client disconnected; upstream stream cancelled');
+      return;
+    }
+    throw error;
+  } finally {
+    req.off('aborted', abortUpstream);
+    res.off('close', abortOnEarlyResponseClose);
   }
-
-  const upstream = await fetch(upstreamUrl, {
-    method: req.method,
-    headers,
-    body,
-    redirect: 'manual',
-    signal: controller.signal,
-  });
-
-  const blockedHeaders = new Set([
-    'connection',
-    'content-length',
-    'keep-alive',
-    'proxy-authenticate',
-    'proxy-authorization',
-    'te',
-    'trailer',
-    'transfer-encoding',
-    'upgrade',
-  ]);
-  for (const [name, value] of upstream.headers) {
-    if (!blockedHeaders.has(name.toLowerCase())) res.setHeader(name, value);
-  }
-  res.statusCode = upstream.status;
-
-  if (!upstream.body) {
-    res.end();
-    return;
-  }
-
-  Readable.fromWeb(upstream.body).pipe(res);
 }
 
 async function handler(req, res) {
