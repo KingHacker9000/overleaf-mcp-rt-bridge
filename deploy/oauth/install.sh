@@ -38,8 +38,12 @@ if [[ ! -s "$OWNER_PASSWORD_HASH_FILE" ]]; then
   exit 1
 fi
 
+if ! getent group "$RUN_GROUP" >/dev/null 2>&1; then
+  groupadd --system "$RUN_GROUP"
+fi
+
 if ! id "$RUN_USER" >/dev/null 2>&1; then
-  useradd --system --no-create-home --shell /usr/sbin/nologin "$RUN_USER"
+  useradd --system --no-create-home --shell /usr/sbin/nologin --gid "$RUN_GROUP" "$RUN_USER"
 fi
 
 mkdir -p "$INSTALL_DIR" "$CONFIG_DIR"
