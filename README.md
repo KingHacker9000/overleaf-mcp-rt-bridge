@@ -118,7 +118,7 @@ then validate and reload Caddy normally.
 
 ## Authentication
 
-Every `/mcp` request requires:
+Every private bridge `/mcp` request requires:
 
 ```text
 Authorization: Bearer <token>
@@ -128,6 +128,38 @@ The `/health` endpoint is intentionally unauthenticated and reports only basic
 bridge/upstream readiness.
 
 The Overleaf session cookie is never returned by the bridge.
+
+### ChatGPT OAuth facade
+
+For ChatGPT custom apps, keep the private bearer-authenticated bridge unchanged
+and place the optional OAuth facade from `deploy/oauth/` at the public HTTPS
+edge. It implements OAuth authorization-code + PKCE S256, protected-resource
+metadata, authorization-server metadata, dynamic client registration, and
+translation of OAuth access tokens to the private bridge bearer.
+
+The public resource remains:
+
+```text
+https://mcp.example.com/mcp
+```
+
+OAuth endpoints are:
+
+```text
+/.well-known/oauth-protected-resource
+/.well-known/oauth-authorization-server
+/oauth/register
+/oauth/authorize
+/oauth/token
+```
+
+The OAuth facade intentionally keeps registered clients, authorization codes,
+and access tokens in memory. Restarting it requires reconnecting/re-authorizing
+the client. The upstream MCP bearer and owner password hash stay in root-owned
+files and are never returned to the client.
+
+A matching Caddy example is included at
+`deploy/caddy/Caddyfile.oauth.example`.
 
 ## Tool policy
 
