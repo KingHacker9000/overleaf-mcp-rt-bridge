@@ -79,7 +79,7 @@ function html(res, status, body) {
     'content-length': String(payload.length),
     'cache-control': 'no-store',
     'x-frame-options': 'DENY',
-    'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'",
+    'content-security-policy': `default-src 'none'; style-src 'unsafe-inline'; form-action ${issuer}; base-uri 'none'`,
   });
   res.end(payload);
 }
