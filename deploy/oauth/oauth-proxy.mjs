@@ -338,6 +338,10 @@ async function handler(req, res) {
         redirectUris: [...new Set(input.redirect_uris)],
         createdAt: now(),
       });
+      console.log(
+        '[oauth-proxy] registered client redirect_uris=' +
+          clients.get(clientId).redirectUris.join(','),
+      );
       json(res, 201, {
         client_id: clientId,
         client_id_issued_at: Math.floor(now() / 1000),
@@ -351,6 +355,12 @@ async function handler(req, res) {
 
     if (req.method === 'GET' && url.pathname === '/oauth/authorize') {
       const data = validateAuthorize(url);
+      console.log(
+        '[oauth-proxy] authorization request redirect_uri=' +
+          data.redirectUri +
+          '; resource=' +
+          data.requestedResource,
+      );
       const requestId = randomToken(24);
       authRequests.set(requestId, {
         ...data,
@@ -390,8 +400,13 @@ async function handler(req, res) {
         expiresAt: now() + codeTtlSec * 1000,
       });
 
+      const location = authorizeRedirect(request, code);
+      console.log(
+        '[oauth-proxy] authorization approved; redirect_uri=' +
+          request.redirectUri,
+      );
       res.writeHead(302, {
-        location: authorizeRedirect(request, code),
+        location,
         'cache-control': 'no-store',
       });
       res.end();
@@ -426,6 +441,10 @@ async function handler(req, res) {
         return;
       }
 
+      console.log(
+        '[oauth-proxy] token exchange accepted; resource_parameter=' +
+          (requestedResource ? 'present' : 'omitted'),
+      );
       authCodes.delete(codeValue);
       const accessToken = randomToken(32);
       accessTokens.set(accessToken, {
