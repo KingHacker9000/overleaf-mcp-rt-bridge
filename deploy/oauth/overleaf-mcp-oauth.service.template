@@ -1,0 +1,32 @@
+[Unit]
+Description=Overleaf MCP OAuth Proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@@RUN_USER@@
+Group=@@RUN_GROUP@@
+EnvironmentFile=@@CONFIG_DIR@@/oauth.env
+ExecStart=/usr/bin/node @@INSTALL_DIR@@/oauth-proxy.mjs
+Restart=on-failure
+RestartSec=2
+UMask=0077
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadOnlyPaths=@@CONFIG_DIR@@
+ReadWritePaths=/run
+
+[Install]
+WantedBy=multi-user.target
