@@ -204,7 +204,6 @@ function authorizeRedirect(data, code) {
   const target = new URL(data.redirectUri);
   target.searchParams.set('code', code);
   if (data.state) target.searchParams.set('state', data.state);
-  target.searchParams.set('iss', issuer);
   return target.toString();
 }
 
@@ -290,7 +289,11 @@ async function handler(req, res) {
       return;
     }
 
-    if (req.method === 'GET' && url.pathname === '/.well-known/oauth-protected-resource') {
+    if (
+      req.method === 'GET' &&
+      (url.pathname === '/.well-known/oauth-protected-resource' ||
+        url.pathname === '/.well-known/oauth-protected-resource/mcp')
+    ) {
       json(res, 200, {
         resource,
         authorization_servers: [issuer],
@@ -311,7 +314,6 @@ async function handler(req, res) {
         token_endpoint_auth_methods_supported: ['none'],
         code_challenge_methods_supported: ['S256'],
         scopes_supported: [scope],
-        authorization_response_iss_parameter_supported: true,
       });
       return;
     }
@@ -417,7 +419,7 @@ async function handler(req, res) {
       if (
         code.clientId !== clientId ||
         code.redirectUri !== redirectUri ||
-        code.resource !== requestedResource ||
+        (requestedResource && code.resource !== requestedResource) ||
         sha256Base64Url(verifier) !== code.codeChallenge
       ) {
         json(res, 400, { error: 'invalid_grant' });
