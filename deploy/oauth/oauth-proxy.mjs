@@ -26,6 +26,9 @@ const scope = process.env.OAUTH_SCOPE || 'overleaf:owner';
 const accessTokenTtlSec = Number(process.env.ACCESS_TOKEN_TTL_SEC || '3600');
 const codeTtlSec = Number(process.env.AUTH_CODE_TTL_SEC || '300');
 const requestTtlSec = Number(process.env.AUTH_REQUEST_TTL_SEC || '300');
+const refreshTokenTtlSec = Number(process.env.REFRESH_TOKEN_TTL_SEC || '2592000');
+const stateFile = process.env.OAUTH_STATE_FILE || '/var/lib/overleaf-mcp-oauth/state.json';
+const staticClientsFile = process.env.OAUTH_STATIC_CLIENTS_FILE || '';
 const allowedRedirectHosts = new Set(
   (process.env.OAUTH_REDIRECT_HOSTS || 'chatgpt.com')
     .split(',')
@@ -44,6 +47,7 @@ const clients = new Map();
 const authRequests = new Map();
 const authCodes = new Map();
 const accessTokens = new Map();
+const refreshTokens = new Map();
 
 function now() {
   return Date.now();
@@ -60,6 +64,75 @@ function sha256Base64Url(value) {
 function safeEqualHex(a, b) {
   if (!/^[a-f0-9]{64}$/.test(a) || !/^[a-f0-9]{64}$/.test(b)) return false;
   return crypto.timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'));
+}
+
+function loadMap(target, value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+  for (const [key, entry] of Object.entries(value)) {
+    if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+      target.set(key, entry);
+    }
+  }
+}
+
+function persistState() {
+  const dir = stateFile.slice(0, Math.max(0, stateFile.lastIndexOf('/'))) || '.';
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const tempFile = `${stateFile}.tmp-${process.pid}`;
+  const payload = JSON.stringify(
+    {
+      version: 1,
+      clients: Object.fromEntries(clients),
+      accessTokens: Object.fromEntries(accessTokens),
+      refreshTokens: Object.fromEntries(refreshTokens),
+    },
+    null,
+    2,
+  );
+  fs.writeFileSync(tempFile, payload + '\n', { mode: 0o600 });
+  fs.renameSync(tempFile, stateFile);
+}
+
+function loadPersistentState() {
+  if (!fs.existsSync(stateFile)) return;
+  const parsed = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+  if (parsed.version !== 1) throw new Error('unsupported OAuth state version');
+  loadMap(clients, parsed.clients);
+  loadMap(accessTokens, parsed.accessTokens);
+  loadMap(refreshTokens, parsed.refreshTokens);
+}
+
+function loadStaticClients() {
+  if (!staticClientsFile) return;
+  if (!fs.existsSync(staticClientsFile)) {
+    throw new Error(`static clients file not found: ${staticClientsFile}`);
+  }
+  const parsed = JSON.parse(fs.readFileSync(staticClientsFile, 'utf8'));
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('static clients file must contain a JSON object');
+  }
+  for (const [clientId, entry] of Object.entries(parsed)) {
+    const redirectUris = entry?.redirectUris;
+    if (
+      !clientId ||
+      !Array.isArray(redirectUris) ||
+      redirectUris.length === 0 ||
+      !redirectUris.every((value) => {
+        try {
+          return new URL(value).protocol === 'https:';
+        } catch {
+          return false;
+        }
+      })
+    ) {
+      throw new Error(`invalid static OAuth client: ${clientId}`);
+    }
+    clients.set(clientId, {
+      redirectUris: [...new Set(redirectUris)],
+      createdAt: Number(entry.createdAt || now()),
+      static: true,
+    });
+  }
 }
 
 function json(res, status, body, headers = {}) {
@@ -108,6 +181,7 @@ async function parseForm(req) {
 
 function cleanup() {
   const cutoff = now();
+  let persistentChanged = false;
   for (const [key, value] of authRequests) {
     if (value.expiresAt <= cutoff) authRequests.delete(key);
   }
@@ -115,8 +189,18 @@ function cleanup() {
     if (value.expiresAt <= cutoff) authCodes.delete(key);
   }
   for (const [key, value] of accessTokens) {
-    if (value.expiresAt <= cutoff) accessTokens.delete(key);
+    if (value.expiresAt <= cutoff) {
+      accessTokens.delete(key);
+      persistentChanged = true;
+    }
   }
+  for (const [key, value] of refreshTokens) {
+    if (value.expiresAt <= cutoff) {
+      refreshTokens.delete(key);
+      persistentChanged = true;
+    }
+  }
+  if (persistentChanged) persistState();
 }
 setInterval(cleanup, 60_000).unref();
 
@@ -142,7 +226,7 @@ function bearerChallenge(error = 'invalid_token', description = 'Authentication 
 function renderLogin(requestId, error = '') {
   const message = error
     ? `<p style="color:#b42318">${escapeHtml(error)}</p>`
-    : '<p>Authorize ChatGPT to access your Overleaf MCP tools.</p>';
+    : '<p>Authorize this connector to access your Overleaf MCP tools.</p>';
   return `<!doctype html>
 <html>
 <head>
@@ -173,6 +257,10 @@ function escapeHtml(value) {
     .replaceAll("'", '&#39;');
 }
 
+loadPersistentState();
+loadStaticClients();
+persistState();
+
 function validateAuthorize(url) {
   const responseType = url.searchParams.get('response_type');
   const clientId = url.searchParams.get('client_id');
@@ -180,8 +268,8 @@ function validateAuthorize(url) {
   const state = url.searchParams.get('state') || '';
   const codeChallenge = url.searchParams.get('code_challenge');
   const codeChallengeMethod = url.searchParams.get('code_challenge_method');
-  const requestedScope = url.searchParams.get('scope') || '';
-  const requestedResource = url.searchParams.get('resource') || '';
+  const requestedScope = url.searchParams.get('scope') || scope;
+  const requestedResource = url.searchParams.get('resource') || resource;
 
   if (responseType !== 'code') throw new Error('unsupported response_type');
   const client = clients.get(clientId);
@@ -337,7 +425,7 @@ async function handler(req, res) {
         token_endpoint: `${issuer}/oauth/token`,
         registration_endpoint: `${issuer}/oauth/register`,
         response_types_supported: ['code'],
-        grant_types_supported: ['authorization_code'],
+        grant_types_supported: ['authorization_code', 'refresh_token'],
         token_endpoint_auth_methods_supported: ['none'],
         code_challenge_methods_supported: ['S256'],
         scopes_supported: [scope],
@@ -364,7 +452,9 @@ async function handler(req, res) {
       clients.set(clientId, {
         redirectUris: [...new Set(input.redirect_uris)],
         createdAt: now(),
+        static: false,
       });
+      persistState();
       console.log(
         '[oauth-proxy] registered client redirect_uris=' +
           clients.get(clientId).redirectUris.join(','),
@@ -443,50 +533,111 @@ async function handler(req, res) {
     if (req.method === 'POST' && url.pathname === '/oauth/token') {
       const form = await parseForm(req);
       const grantType = form.get('grant_type');
-      const codeValue = form.get('code') || '';
       const clientId = form.get('client_id') || '';
-      const redirectUri = form.get('redirect_uri') || '';
-      const verifier = form.get('code_verifier') || '';
-      const requestedResource = form.get('resource') || '';
-      const code = authCodes.get(codeValue);
 
-      if (grantType !== 'authorization_code') {
-        json(res, 400, { error: 'unsupported_grant_type' });
+      if (grantType === 'authorization_code') {
+        const codeValue = form.get('code') || '';
+        const redirectUri = form.get('redirect_uri') || '';
+        const verifier = form.get('code_verifier') || '';
+        const requestedResource = form.get('resource') || '';
+        const code = authCodes.get(codeValue);
+
+        if (!code || code.expiresAt <= now()) {
+          json(res, 400, { error: 'invalid_grant' });
+          return;
+        }
+        if (
+          code.clientId !== clientId ||
+          code.redirectUri !== redirectUri ||
+          (requestedResource && code.resource !== requestedResource) ||
+          sha256Base64Url(verifier) !== code.codeChallenge
+        ) {
+          json(res, 400, { error: 'invalid_grant' });
+          return;
+        }
+
+        console.log(
+          '[oauth-proxy] token exchange accepted; resource_parameter=' +
+            (requestedResource ? 'present' : 'omitted'),
+        );
+        authCodes.delete(codeValue);
+
+        const accessToken = randomToken(32);
+        const refreshToken = randomToken(48);
+        const refreshExpiresAt = now() + refreshTokenTtlSec * 1000;
+
+        accessTokens.set(accessToken, {
+          clientId,
+          scope: code.scope,
+          resource: code.resource,
+          expiresAt: now() + accessTokenTtlSec * 1000,
+        });
+        refreshTokens.set(refreshToken, {
+          clientId,
+          scope: code.scope,
+          resource: code.resource,
+          expiresAt: refreshExpiresAt,
+        });
+        persistState();
+
+        json(res, 200, {
+          access_token: accessToken,
+          refresh_token: refreshToken,
+          token_type: 'Bearer',
+          expires_in: accessTokenTtlSec,
+          scope: code.scope,
+        });
         return;
       }
-      if (!code || code.expiresAt <= now()) {
-        json(res, 400, { error: 'invalid_grant' });
-        return;
-      }
-      if (
-        code.clientId !== clientId ||
-        code.redirectUri !== redirectUri ||
-        (requestedResource && code.resource !== requestedResource) ||
-        sha256Base64Url(verifier) !== code.codeChallenge
-      ) {
-        json(res, 400, { error: 'invalid_grant' });
+
+      if (grantType === 'refresh_token') {
+        const refreshValue = form.get('refresh_token') || '';
+        const requestedResource = form.get('resource') || '';
+        const requestedScope = form.get('scope') || '';
+        const current = refreshTokens.get(refreshValue);
+
+        if (!current || current.expiresAt <= now()) {
+          json(res, 400, { error: 'invalid_grant' });
+          return;
+        }
+        if (
+          (clientId && current.clientId !== clientId) ||
+          (requestedResource && current.resource !== requestedResource) ||
+          (requestedScope && requestedScope !== current.scope)
+        ) {
+          json(res, 400, { error: 'invalid_grant' });
+          return;
+        }
+
+        refreshTokens.delete(refreshValue);
+        const accessToken = randomToken(32);
+        const refreshToken = randomToken(48);
+        accessTokens.set(accessToken, {
+          clientId: current.clientId,
+          scope: current.scope,
+          resource: current.resource,
+          expiresAt: now() + accessTokenTtlSec * 1000,
+        });
+        refreshTokens.set(refreshToken, {
+          clientId: current.clientId,
+          scope: current.scope,
+          resource: current.resource,
+          expiresAt: now() + refreshTokenTtlSec * 1000,
+        });
+        persistState();
+
+        console.log('[oauth-proxy] refresh token exchange accepted');
+        json(res, 200, {
+          access_token: accessToken,
+          refresh_token: refreshToken,
+          token_type: 'Bearer',
+          expires_in: accessTokenTtlSec,
+          scope: current.scope,
+        });
         return;
       }
 
-      console.log(
-        '[oauth-proxy] token exchange accepted; resource_parameter=' +
-          (requestedResource ? 'present' : 'omitted'),
-      );
-      authCodes.delete(codeValue);
-      const accessToken = randomToken(32);
-      accessTokens.set(accessToken, {
-        clientId,
-        scope: code.scope,
-        resource: code.resource,
-        expiresAt: now() + accessTokenTtlSec * 1000,
-      });
-
-      json(res, 200, {
-        access_token: accessToken,
-        token_type: 'Bearer',
-        expires_in: accessTokenTtlSec,
-        scope: code.scope,
-      });
+      json(res, 400, { error: 'unsupported_grant_type' });
       return;
     }
 
