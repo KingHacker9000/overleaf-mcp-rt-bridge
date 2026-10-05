@@ -153,10 +153,34 @@ OAuth endpoints are:
 /oauth/token
 ```
 
-The OAuth facade intentionally keeps registered clients, authorization codes,
-and access tokens in memory. Restarting it requires reconnecting/re-authorizing
-the client. The upstream MCP bearer and owner password hash stay in root-owned
-files and are never returned to the client.
+The OAuth facade persists dynamically registered clients, access tokens, and
+refresh tokens in a service-owned state file. Short-lived authorization requests
+and authorization codes remain memory-only. Static public OAuth clients can be
+declared in a root-owned JSON file, which is useful for clients that ask for a
+pre-issued Client ID instead of using dynamic client registration.
+
+Default persistent paths:
+
+```text
+/etc/overleaf-mcp-oauth/static-clients.json
+/var/lib/overleaf-mcp-oauth/state.json
+```
+
+Static client file format:
+
+```json
+{
+  "example-public-client": {
+    "redirectUris": [
+      "https://client.example.com/oauth/callback"
+    ]
+  }
+}
+```
+
+The facade supports authorization-code + PKCE S256 and refresh-token grants.
+The upstream MCP bearer and owner password hash stay in root-owned files and
+are never returned to clients.
 
 A matching Caddy example is included at
 `deploy/caddy/Caddyfile.oauth.example`.
