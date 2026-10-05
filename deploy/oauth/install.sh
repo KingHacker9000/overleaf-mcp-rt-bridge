@@ -6,6 +6,10 @@ RUN_USER="${OAUTH_USER:-overleaf-oauth}"
 RUN_GROUP="${OAUTH_GROUP:-$RUN_USER}"
 INSTALL_DIR="${OAUTH_INSTALL_DIR:-/usr/local/lib/overleaf-mcp-oauth}"
 CONFIG_DIR="${OAUTH_CONFIG_DIR:-/etc/overleaf-mcp-oauth}"
+STATE_DIR="${OAUTH_STATE_DIR:-/var/lib/overleaf-mcp-oauth}"
+OAUTH_STATE_FILE="${OAUTH_STATE_FILE:-$STATE_DIR/state.json}"
+OAUTH_STATIC_CLIENTS_FILE="${OAUTH_STATIC_CLIENTS_FILE:-$CONFIG_DIR/static-clients.json}"
+REFRESH_TOKEN_TTL_SEC="${REFRESH_TOKEN_TTL_SEC:-2592000}"
 OAUTH_HOST="${OAUTH_HOST:-127.0.0.1}"
 OAUTH_PORT="${OAUTH_PORT:-9456}"
 OAUTH_SCOPE="${OAUTH_SCOPE:-overleaf:owner}"
@@ -46,10 +50,23 @@ if ! id "$RUN_USER" >/dev/null 2>&1; then
   useradd --system --no-create-home --shell /usr/sbin/nologin --gid "$RUN_GROUP" "$RUN_USER"
 fi
 
-mkdir -p "$INSTALL_DIR" "$CONFIG_DIR"
+mkdir -p "$INSTALL_DIR" "$CONFIG_DIR" "$STATE_DIR"
 install -o root -g root -m 755 "$REPO_DIR/deploy/oauth/oauth-proxy.mjs" "$INSTALL_DIR/oauth-proxy.mjs"
-chown root:"$RUN_GROUP" "$UPSTREAM_BEARER_TOKEN_FILE" "$OWNER_PASSWORD_HASH_FILE"
-chmod 640 "$UPSTREAM_BEARER_TOKEN_FILE" "$OWNER_PASSWORD_HASH_FILE"
+chown "$RUN_USER:$RUN_GROUP" "$STATE_DIR"
+chmod 700 "$STATE_DIR"
+
+if [[ ! -e "$OAUTH_STATIC_CLIENTS_FILE" ]]; then
+  printf '{}\n' >"$OAUTH_STATIC_CLIENTS_FILE"
+fi
+
+chown root:"$RUN_GROUP" \
+  "$UPSTREAM_BEARER_TOKEN_FILE" \
+  "$OWNER_PASSWORD_HASH_FILE" \
+  "$OAUTH_STATIC_CLIENTS_FILE"
+chmod 640 \
+  "$UPSTREAM_BEARER_TOKEN_FILE" \
+  "$OWNER_PASSWORD_HASH_FILE" \
+  "$OAUTH_STATIC_CLIENTS_FILE"
 
 cat >"$ENV_FILE" <<EOF
 OAUTH_HOST=$OAUTH_HOST
@@ -61,6 +78,9 @@ UPSTREAM_BEARER_TOKEN_FILE=$UPSTREAM_BEARER_TOKEN_FILE
 OWNER_PASSWORD_HASH_FILE=$OWNER_PASSWORD_HASH_FILE
 OAUTH_SCOPE=$OAUTH_SCOPE
 OAUTH_REDIRECT_HOSTS=$OAUTH_REDIRECT_HOSTS
+OAUTH_STATE_FILE=$OAUTH_STATE_FILE
+OAUTH_STATIC_CLIENTS_FILE=$OAUTH_STATIC_CLIENTS_FILE
+REFRESH_TOKEN_TTL_SEC=$REFRESH_TOKEN_TTL_SEC
 EOF
 chown root:"$RUN_GROUP" "$ENV_FILE"
 chmod 640 "$ENV_FILE"
@@ -69,12 +89,14 @@ escaped_user="$(printf '%s' "$RUN_USER" | sed 's/[&|]/\\&/g')"
 escaped_group="$(printf '%s' "$RUN_GROUP" | sed 's/[&|]/\\&/g')"
 escaped_install="$(printf '%s' "$INSTALL_DIR" | sed 's/[&|]/\\&/g')"
 escaped_config="$(printf '%s' "$CONFIG_DIR" | sed 's/[&|]/\\&/g')"
+escaped_state="$(printf '%s' "$STATE_DIR" | sed 's/[&|]/\\&/g')"
 
 sed \
   -e "s|@@RUN_USER@@|$escaped_user|g" \
   -e "s|@@RUN_GROUP@@|$escaped_group|g" \
   -e "s|@@INSTALL_DIR@@|$escaped_install|g" \
   -e "s|@@CONFIG_DIR@@|$escaped_config|g" \
+  -e "s|@@STATE_DIR@@|$escaped_state|g" \
   "$UNIT_TEMPLATE" >"$UNIT_TARGET"
 chmod 644 "$UNIT_TARGET"
 
