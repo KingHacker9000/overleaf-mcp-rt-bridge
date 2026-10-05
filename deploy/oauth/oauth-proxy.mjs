@@ -97,7 +97,13 @@ function loadPersistentState() {
   if (!fs.existsSync(stateFile)) return;
   const parsed = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
   if (parsed.version !== 1) throw new Error('unsupported OAuth state version');
-  loadMap(clients, parsed.clients);
+  if (parsed.clients && typeof parsed.clients === 'object' && !Array.isArray(parsed.clients)) {
+    for (const [clientId, entry] of Object.entries(parsed.clients)) {
+      if (entry && typeof entry === 'object' && !Array.isArray(entry) && !entry.static) {
+        clients.set(clientId, entry);
+      }
+    }
+  }
   loadMap(accessTokens, parsed.accessTokens);
   loadMap(refreshTokens, parsed.refreshTokens);
 }
@@ -464,7 +470,7 @@ async function handler(req, res) {
         client_id_issued_at: Math.floor(now() / 1000),
         redirect_uris: clients.get(clientId).redirectUris,
         token_endpoint_auth_method: 'none',
-        grant_types: ['authorization_code'],
+        grant_types: ['authorization_code', 'refresh_token'],
         response_types: ['code'],
       });
       return;
