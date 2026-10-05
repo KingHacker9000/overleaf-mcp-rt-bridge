@@ -11,6 +11,7 @@ const READ_ONLY = new Set([
 
 const DESTRUCTIVE = new Set([
   'overleaf_delete_entity',
+  'overleaf_delete_project',
 ]);
 
 const OAUTH_SCOPES = (process.env.MCP_OAUTH_SCOPES || 'overleaf:owner')
