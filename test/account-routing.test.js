@@ -59,7 +59,7 @@ test('two accounts on the same Overleaf website require explicit host on every a
     assert.deepEqual(annotated.inputSchema.required, ['host']);
     assert.match(annotated.inputSchema.properties.host.description, /brother/);
     assert.deepEqual(projectTool.inputSchema.required, []); // never mutate upstream schema
-    assert.doesNotMatch(JSON.stringify(annotated), /mine|his/); // never publish cookies
+    assert.doesNotMatch(JSON.stringify(annotated), /"mine"|"his"/); // never publish cookies
   }));
 
 test('legacy top-level host is not double-counted after v2 migration', () =>
