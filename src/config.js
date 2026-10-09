@@ -20,7 +20,13 @@ export function loadConfig(env = process.env) {
     throw new Error('MCP_BEARER_TOKEN is required');
   }
 
+  const hostSelection = env.BRIDGE_HOST_SELECTION?.trim() || 'auto';
+  if (!['auto', 'always', 'off'].includes(hostSelection)) {
+    throw new Error('BRIDGE_HOST_SELECTION must be auto, always, or off');
+  }
+
   return {
+    hostSelection,
     host: env.BRIDGE_HOST?.trim() || '127.0.0.1',
     port: parsePort(env.BRIDGE_PORT || '8787'),
     bearerToken,

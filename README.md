@@ -185,6 +185,67 @@ are never returned to clients.
 A matching Caddy example is included at
 `deploy/caddy/Caddyfile.oauth.example`.
 
+## Two Overleaf accounts (one overleaf.com server)
+
+The upstream `overleaf-mcp-rt` 2.2.0 already supports **named credentials
+profiles**. Both profiles can point to `https://www.overleaf.com` while
+using completely separate session cookies. You do not need a second running
+bridge or a second ChatGPT connector.
+
+Log in to the second account **using the same credentials file that your
+bridge reads**. On the Pi, the installer normally symlinks this from
+`~/.config/overleaf-mcp-rt/credentials.json` to its protected secrets dir:
+
+```bash
+export OVERLEAF_CREDENTIALS_FILE="$(readlink -f ~/.config/overleaf-mcp-rt/credentials.json)"
+./node_modules/.bin/overleaf-mcp-rt login --url https://www.overleaf.com --name brother
+./node_modules/.bin/overleaf-mcp-rt hosts
+./node_modules/.bin/overleaf-mcp-rt diagnose --host brother
+./node_modules/.bin/overleaf-mcp-rt ls --host brother
+```
+
+Run this from the bridge repository as its service user. Browser login can
+be used when there is a browser available; on a headless Pi choose the
+cookie-paste login mode and have the second account owner supply their own
+session cookie **only in the local trusted terminal**. Never put cookies in
+issues, logs, chat, or a shared Git repository. Adding a profile preserves the
+first profile, which remains the default. The upstream credentials file is
+re-read on each call, so a restart is normally not required.
+
+### Explicit account routing
+
+`BRIDGE_HOST_SELECTION=auto` (default) makes the bridge require the `host`
+argument for **every account-specific tool** as soon as two or more credential
+profiles exist. `overleaf_list_hosts` remains callable without `host`.
+
+For instance, `overleaf_list_projects({ "host": "brother" })` lists only
+projects visible to the brother profile, and
+`overleaf_edit_doc({ "host": "overleaf.com", ... })` edits through the
+original profile. Account names refer to **login profiles**, not distinct
+hostname URLs. Missing or unknown profiles cause an error before forwarding
+the operation to Overleaf. The bridge updates tool schemas to mark `host`
+as required whenever the policy is active. The policy reads the credentials
+file on every tool call, so it also protects previously initialized clients.
+
+Optional `BRIDGE_HOST_SELECTION` modes:
+
+- `auto`: require an explicit profile for 2+ accounts (recommended).
+- `always`: require one even for a single account.
+- `off`: disable the extra guard; normal upstream default account rules apply.
+
+To set a nondefault mode, edit the existing `secrets/bridge.env` and
+restart `overleaf-mcp-rt-bridge.service`. For the default `auto` mode,
+no changes to the deployed environment are needed.
+
+**Security boundary:** This solves cookie collisions and accidental
+cross-account edits, **not** access isolation between ChatGPT users. The
+current OAuth facade issues owner-level tokens that can reach *all* named
+profiles. Anyone authorized to use the same ChatGPT connector may select
+either profile. If the two people need separate project permissions or
+private credentials, use separate OAuth identities and independently routed
+upstreams; that is not provided by this change. Sharing a ChatGPT login is
+not a substitute for separate ChatGPT accounts.
+
 ## Tool policy
 
 By default the bridge exposes all tools reported by `overleaf-mcp-rt`.
